@@ -1,0 +1,12 @@
+java/*.class
+*.gz
+logs/
+data/
+test.jpg
+web/*.pem
+web/*.gz
+web/log-node
+web/logs/
+web/origPOC
+web/node_modules/
+web/service-log
