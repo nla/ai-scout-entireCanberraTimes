@@ -1,6 +1,6 @@
 # ai-scout-entireCanberraTimes
 
-Demo of newspaper searching - all 3.1m Canberra Times articles, 1924-94
+Demo of newspaper searching - all 3.1m Canberra Times articles, 1926-94
 
 This repo contains code that has been copied from a succession of exploratory demos, so there is dead code inherited from those demos. When I come across it, I'll delete it.
 
@@ -11,6 +11,22 @@ Unlike an earlier newspaper demo, we dont have named entities (TODO)
 ## Java programs
 
 TODO - describe GTE and nomic embeddings
+### LoadBgeBase768ToSolr
+Original load program used in earlier demos that also loaded entities (which we dont load) - just included for "background" info
+
+### AddGteBase768EmbeddingsToArticles
+
+Use the now dropped GTE ( Alibaba-NLP/gte-base-en-v1.5 ) embedding - although it supports a long (8192) token context, the results were so-so.
+
+## AddNomic768EmbeddingsToArticles
+
+Same as AddGteBase768EmbeddingsToArticles, except backend embedding server used nomic ( nomic-ai/nomic-embed-text-v1.5 ) - so, no point in being a new program, right?  The embedding used COULD just have been a runtime parameter to a mythical AddEmbeddingsToArticles program... TODO
+
+## LoadGteBase768ToSolr
+
+Loads the output of the AddXXXEmbeddingsToArticles program to SOLR (see SOLR schema section below)
+
+
 
 ## Web server
 
@@ -72,11 +88,23 @@ run webserver like this
 
 `node app.js`
 
-TODO description
+One of the interesting things tried in this demo was a fancy filtered search using edismax in routes/search.js:
 
+```
+  let fancyQ = "&q={!bool filter=$retrievalStage must=$rankingStage}" +
+  "&retrievalStage={!bool should=$lexicalQuery should=$vectorQuery}" +
+  "&rankingStage={!func}sum(query($normalisedLexicalQuery),query($normalisedVectorQuery))" +
+  "&normalisedLexicalQuery={!func}scale(query($lexicalQuery),0," + (1.0 - keywordScaling) + ")" +
+  "&normalisedVectorQuery={!func}scale(query($vectorQuery),0," + keywordScaling + ")" +
+  "&lexicalQuery={!type=edismax qf='heading^2 article^1 headingStemmed^1.5 articleStemmed^0.5' " +
+    "pf='heading^4 article^1.5 headingStemmed^2.0 articleStemmed^0.8'}" + stxt +
+  "&vectorQuery={!knn f=vector topK=100}" +  JSON.stringify(qVec) ;
+```
+
+Is it worth it?  How can it be improved?
 
 ## SOLR schema
 
-See SOLRschemas/managed-schema.xml
+See SOLRschemas/managed-schema.xml - basic newspaper article schema with a vector (embedding), unstemmed and stemmed text (for keyword/phrase search) and metadata (title, heading, article category, issue date & year).
 
 
