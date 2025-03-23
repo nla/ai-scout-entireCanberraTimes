@@ -70,7 +70,8 @@ const appConfig = {
 	util: util,
 	embeddingURL: process.env.EMBEDDING_URL,
 	summaryURL: process.env.SUMMARY_URL,
-	inferenceEngine: process.env.INFERENCE_ENGINE
+	inferenceEngine: process.env.INFERENCE_ENGINE,
+	modelName: process.env.MODEL_NAME
 } ;
 
 console.log("appConfig initialised as " + JSON.stringify(appConfig)) ;

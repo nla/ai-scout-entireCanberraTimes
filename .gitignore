@@ -10,3 +10,4 @@ web/logs/
 web/origPOC
 web/node_modules/
 web/service-log
+web/nohup.out

@@ -154,6 +154,8 @@ async function getResultListSummaryChunked(docList, question, res) {
 
     case "vllm":
     case "llama.cpp-chatML":
+    case "openAI":
+
       /* starling?
       prompt = "The source context for a summary and 3 suggested follow-up questions consists of " + maxArts + " articles and a single question.  Each article appears within an " +
               "article tag (for example, [Article 2]) and starts with the article number and date of issue.  " +
@@ -219,6 +221,7 @@ async function getResultListSummaryChunked(docList, question, res) {
 
     var data ;
     let vllm = false ;
+    let openAI = false ;
 
     switch (appConfig.inferenceEngine) {
       case "llama.cpp":
@@ -241,7 +244,7 @@ async function getResultListSummaryChunked(docList, question, res) {
         vllm = true ;
         data = {
           "prompt": prompt,
-          "use_beam_search": false, // just generate one response..              
+ // vllm 0.6.3         "use_beam_search": false, // just generate one response..              
           "temperature":0.0,
           "n":1,
           "max_tokens": 600,
@@ -250,12 +253,24 @@ async function getResultListSummaryChunked(docList, question, res) {
           stop: ["<", "<|im_end|>", "[**End]"]  // - seems to work a bit!
     //,"system-prompt":{"prompt": "Be helpful.", "anti_prompt": "user:", "assistant_name": "assistant:"} // test
         } ;
-        break ;        
+        break ;   
+        
+      case "openAI":
+        openAI = true ;
+        data = {
+          "model": appConfig.modelName,
+          "prompt": prompt,
+          "max_tokens": 600,
+          "stream":true,
+          "temperature": 0
+        }
+      break ;      
 
       default:
           throw "Unexpected inference engine: " + appConfig.inferenceEngine ;
     }
 
+    console.log("SENDING RESULTS SUMMARY req TO " + appConfig.summaryURL) ;
     response = await fetch(appConfig.summaryURL, { 
       method: "POST",
       headers: {
@@ -273,16 +288,25 @@ async function getResultListSummaryChunked(docList, question, res) {
 
       while (true) {
         const { done, value } = await reader.read() ;
-       // console.log("got getResultListSummaryChunked done:" + done + " value " + value) ;
+       console.log("\ngot getResultListSummaryChunked done:" + done) ; // + " value " + value) ;
         if (done) break;
         let latestText = new TextDecoder("utf-8").decode(value) ;
-      // console.log("\nlatestText now is: " + latestText) ;
+        {
+          let junk = latestText ;
+          if (junk && (junk.length > 100)) junk = junk.substring(0, 50) + " ... " + junk.substring(junk.length - 50) ;
+          console.log("value.length was " + value.length + "\nlatestText now is: " + junk) ;
+        }
         text +=  latestText ;
-        //console.log("text received tot len " + text.length) ;
-        if (text.endsWith("\0")) {
-          //console.log("sending text:" + text) ;
+        console.log("text received tot len " + text.length) ;
+        let splitChar = "X" ;
+        if (text.endsWith("\0")) splitChar = "\0" ;
+        else if (text.endsWith("\n")) splitChar = "\n" ;
 
-          const objects = text.split("\0");
+        if(splitChar != "X") {
+        //if (text.endsWith("\0")) {
+          console.log("sending text") ; // + text) ;
+
+          const objects = text.split(splitChar) ; // text.split("\0");
           let runningText = "" ;
           for (const obj of objects) {
             try {
@@ -306,7 +330,7 @@ async function getResultListSummaryChunked(docList, question, res) {
                           skip = newSkip  ;
   //                        console.log("rt: " + runningText + ",skip:" + skip) ;
                         }
-
+                        console.log("\nSKIP="+skip+ ", runningText=" + runningText) ;
 
                         if (runningText.length > 0) 
                           res.write(JSON.stringify({ok: true, type: "resultListSummary", results: {summary: runningText, done:false}})+ "\n") ;
@@ -322,6 +346,51 @@ async function getResultListSummaryChunked(docList, question, res) {
             }
           }
           text = "" ;       
+        }
+        else {
+          console.log("text not ending with \\0") ;
+        }
+      }  
+    }
+    else if (openAI) {
+
+
+      //return {summary: "Summary: " + ro, seq: seq} ;
+/*
+      data: {"id":"cmpl-f87bd9afeffc4922ac24acca6d59f334","object":"text_completion","created":1742611455,
+      "model":"neuralmagic/gemma-2-9b-it-FP8",
+      "choices":[{"index":0,"text":"?","logprobs":null,"finish_reason":null,"stop_reason":null}],"usage":null}
+
+data: {"id":"cmpl-f87bd9afeffc4922ac24acca6d59f334","object":"text_completion","created":1742611455,"model":"neuralmagic/gemma-2-9b-it-FP8","choices":[{"index":0,"text":"\n\n","logprobs":null,"finish_reason":null,"stop_reason":null}],"usage":null}
+
+data: {"id":"cmpl-f87bd9afeffc4922ac24acca6d59f334","object":"text_completion","created":1742611455,"model":"neuralmagic/gemma-2-9b-it-FP8","choices":[{"index":0,"text":"The","logprobs":null,"finish_reason":null,"stop_reason":null}],"usage":null}
+*/
+
+
+      while (true) {
+        const { done, value } = await reader.read() ;
+      //console.log("openAI got getResultListSummaryChunked done:" + done) ; // + " value " + value) ;
+        if (done) {
+          console.log("openAI stream done") ;
+          break;
+        }
+        let latestText = new TextDecoder("utf-8").decode(value) ;
+        //console.log("latestText now is: " + latestText) ;
+        if (latestText.startsWith("data:")) {
+          let p = latestText.substring(5).trim() ;
+          if (p == "[DONE]") {
+            console.log("openAI stream done") ;
+            break ;
+          }
+
+          let d = JSON.parse(p) ;
+        // console.log("openAI choices: " + d.choices) ;
+          if (d.choices) {
+            let t =  d.choices[0].text
+          //  console.log("sending openAI text " + t) ;
+            res.write(JSON.stringify({ok: true, type: "resultListSummary", results: {summary: t, done:false}})+ "\n") ;
+
+          }
         }
       }  
     }
@@ -588,6 +657,7 @@ async function getSummary(seq, doc, question, qVec, vectorSimilarity) {
           break ;
       case "vllm":
       case "llama.cpp-chatML":
+      case "openAI":
           /* some non instruct/chat model model..
           prompt = "Given this article: [ARTICLE STARTS] " + contentToSummarise +
                    " [ARTICLE ENDS] and this question: [QUESTION STARTS] " + cleanseVeryLite(question) +
@@ -609,9 +679,11 @@ async function getSummary(seq, doc, question, qVec, vectorSimilarity) {
           startResponseMarker = "<|im_start|>assistant" ;              
 
 
-          break 
+          break ;
+
+
       default:
-          throw "Unexpected inference engine: " + appConfig.inferenceEngine ;
+          throw "C Unexpected inference engine: " + appConfig.inferenceEngine ;
     }
 
     console.log("Summary prompt: " + prompt) ;
@@ -636,7 +708,7 @@ async function getSummary(seq, doc, question, qVec, vectorSimilarity) {
       case "vllm":
         data = {
           "prompt": prompt,
-          "use_beam_search": false,              
+// vllm 0.6.3          "use_beam_search": false,              
           "temperature":0.0,
           "n":1,
           "max_tokens":80,
@@ -647,8 +719,17 @@ async function getSummary(seq, doc, question, qVec, vectorSimilarity) {
         } ;
         break ;        
 
+      case "openAI":
+        data = {
+          "model": appConfig.modelName,
+          "prompt": prompt,
+          "max_tokens": 80,
+          "stream":false,
+          "temperature": 0
+        }
+        break ;
       default:
-          throw "Unexpected inference engine: " + appConfig.inferenceEngine ;
+          throw "B Unexpected inference engine: " + appConfig.inferenceEngine ;
     }
 
 
@@ -677,9 +758,24 @@ async function getSummary(seq, doc, question, qVec, vectorSimilarity) {
        if (ri >= 0) r = r.substring(ri+15).trim() ;
        
        r = r.replaceAll("60-word summary:", "").replaceAll("[ANSWER ENDS]", "") ;
-       
-       
+              
        return {summary: "Summary: " + r, seq: seq} ;
+
+      case "openAI":
+        if (!eRes.data || !eRes.data.choices) throw "Cant get summary, server returned no data" ;
+        let ro = eRes.data.choices[0].text ;
+        let roi = ro.indexOf("|<|im_end|>") ;
+        if (roi > 0) ro = ro.substring(0, roi) ;
+        return {summary: "Summary: " + ro, seq: seq} ;
+/*
+      {"id":"cmpl-467e1adf93a64673987ce84d179b23b0","object":"text_completion","created":1742540910,
+      "model":"neuralmagic/gemma-2-9b-it-FP8",
+      "choices":[{"index":0,"text":"\n\nThere are **3** \"",
+      "logprobs":null,"finish_reason":"length","stop_reason":null,"prompt_logprobs":null}],
+      "usage":{"prompt_tokens":14,"total_tokens":21,"completion_tokens":7,"prompt_tokens_details":null}}
+*/
+       default:
+        throw "at A Unexpected inference engine: " + appConfig.inferenceEngine ;
     }
   }
   catch (e) {
